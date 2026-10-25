@@ -6,7 +6,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, SyncSender},
     },
     thread,
@@ -14,14 +14,18 @@ use std::{
 };
 
 type Playback = Arc<Mutex<HashMap<u64, VecDeque<f32>>>>;
+/// How long a peer stays "in the room" after its last audio packet.
+const PEER_TTL: Duration = Duration::from_secs(3);
 pub struct Client {
     pub muted: Arc<AtomicBool>,
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     connected: Arc<AtomicBool>,
+    peers: Arc<AtomicUsize>,
     error: Arc<Mutex<Option<String>>>,
 }
 impl Client {
+    /// Reads `HORIZON_VOICE_SERVER` and `HORIZON_VOICE_KEY`.
     pub fn start() -> Result<Self, String> {
         if std::env::var_os("HORIZON_NO_AUDIO").is_some() {
             return Err("audio is disabled".into());
@@ -33,18 +37,28 @@ impl Client {
         let key = key_from_hex(
             &std::env::var("HORIZON_VOICE_KEY").map_err(|_| "voice key not configured")?,
         )?;
+        Self::start_with(endpoint, key)
+    }
+    /// The companion helper's entry point: configuration is explicit, so a
+    /// service unit does not have to export secrets to every child process.
+    pub fn start_with(endpoint: SocketAddr, key: [u8; 32]) -> Result<Self, String> {
+        if std::env::var_os("HORIZON_NO_AUDIO").is_some() {
+            return Err("audio is disabled".into());
+        }
         let this = Self {
             muted: Arc::new(AtomicBool::new(true)),
             active: Arc::new(AtomicBool::new(false)),
             alive: Arc::new(AtomicBool::new(true)),
             connected: Arc::new(AtomicBool::new(false)),
+            peers: Arc::new(AtomicUsize::new(0)),
             error: Arc::new(Mutex::new(None)),
         };
-        let (muted, active, alive, connected, error) = (
+        let (muted, active, alive, connected, peers, error) = (
             this.muted.clone(),
             this.active.clone(),
             this.alive.clone(),
             this.connected.clone(),
+            this.peers.clone(),
             this.error.clone(),
         );
         thread::Builder::new()
@@ -57,6 +71,7 @@ impl Client {
                     active,
                     alive,
                     connected.clone(),
+                    peers,
                 ) {
                     muted.store(true, Ordering::Release);
                     connected.store(false, Ordering::Release);
@@ -74,6 +89,22 @@ impl Client {
     }
     pub fn mute(&self) {
         self.muted.store(true, Ordering::Release);
+    }
+    /// Whether the microphone is live (unmuted and connected).
+    pub fn transmitting(&self) -> bool {
+        !self.muted.load(Ordering::Acquire) && self.connected.load(Ordering::Acquire)
+    }
+    /// Whether the relay acknowledged us recently.
+    pub fn connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
+    }
+    /// Other players currently sending audio.
+    pub fn peers(&self) -> usize {
+        self.peers.load(Ordering::Acquire)
+    }
+    /// The worker stopped with this error, if any.
+    pub fn error(&self) -> Option<String> {
+        self.error.lock().unwrap().clone()
     }
     pub fn toggle(&self) {
         if self.connected.load(Ordering::Acquire) && self.active.load(Ordering::Acquire) {
@@ -205,6 +236,7 @@ fn run(
     active: Arc<AtomicBool>,
     alive: Arc<AtomicBool>,
     connected: Arc<AtomicBool>,
+    peers: Arc<AtomicUsize>,
 ) -> Result<(), String> {
     let socket = UdpSocket::bind(if endpoint.is_ipv4() {
         "0.0.0.0:0"
@@ -265,6 +297,7 @@ fn run(
     let mut heartbeat = Instant::now() - Duration::from_secs(2);
     let mut acknowledged = Instant::now() - Duration::from_secs(10);
     let mut last: HashMap<u64, u64> = HashMap::new();
+    let mut heard: HashMap<u64, Instant> = HashMap::new();
     let mut buffer = [0; MAX_PACKET + 1];
     while alive.load(Ordering::Acquire) {
         if !active.load(Ordering::Acquire) {
@@ -272,9 +305,18 @@ fn run(
             connected.store(false, Ordering::Release);
             playback.lock().unwrap().clear();
             last.clear();
+            heard.clear();
+            peers.store(0, Ordering::Release);
             while rx.try_recv().is_ok() {}
             thread::sleep(Duration::from_millis(20));
             continue;
+        }
+        // Peers leave the room after three seconds without audio, so the
+        // count drops even when nothing else arrives to trigger a prune.
+        let now = Instant::now();
+        if !heard.is_empty() {
+            heard.retain(|_, at| now.duration_since(*at) < PEER_TTL);
+            peers.store(heard.len(), Ordering::Release);
         }
         if heartbeat.elapsed() >= Duration::from_secs(1) {
             seq += 1;
@@ -316,6 +358,7 @@ fn run(
                     continue;
                 }
                 last.insert(p.id, p.seq);
+                heard.insert(p.id, Instant::now());
                 let mut queues = playback.lock().unwrap();
                 let queue = queues.entry(p.id).or_default();
                 if queue.len() + SAMPLES > 3200 {

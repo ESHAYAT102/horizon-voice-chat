@@ -1,5 +1,6 @@
 /target/
-/dist/
+/mod/target/
+/mod/.cargo/
 /.horizon-cache/
 *.env
 !*.env.example
@@ -8,3 +9,5 @@
 *.jar
 *.mcworld
 *.hmod
+!/dist/horizon_voice.hmod
+/dist/*.tmp

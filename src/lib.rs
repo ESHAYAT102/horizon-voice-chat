@@ -10,6 +10,8 @@ use std::{
 
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "client")]
+pub mod helper;
 
 pub const SAMPLES: usize = 320; // 20 ms, 16 kHz mono signed PCM
 pub const MAX_PACKET: usize = 4 + 8 + 8 + SAMPLES * 2 + 32;

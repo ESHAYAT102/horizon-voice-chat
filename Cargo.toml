@@ -17,3 +17,8 @@ cpal = { version = "0.16", optional = true }
 [[bin]]
 name = "horizon-voice-relay"
 path = "src/main.rs"
+
+[[bin]]
+name = "horizon-voice-helper"
+path = "src/bin/horizon-voice-helper.rs"
+required-features = ["client"]

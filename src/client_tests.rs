@@ -5,6 +5,7 @@ fn state() -> Client {
         active: Arc::new(AtomicBool::new(false)),
         alive: Arc::new(AtomicBool::new(true)),
         connected: Arc::new(AtomicBool::new(false)),
+        peers: Arc::new(AtomicUsize::new(0)),
         error: Arc::new(Mutex::new(None)),
     }
 }

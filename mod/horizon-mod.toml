@@ -1,0 +1,8 @@
+id = "horizon_voice"
+name = "Horizon Voice Chat"
+version = "0.2.0"
+description = "Toggle-to-talk voice chat with a small companion helper: /voice, a microphone indicator, and a control file the helper reads. No microphone or network access is requested from the sandbox."
+authors = ["ESHAYAT102"]
+api = "0.1"
+side = "client"
+capabilities = ["hud", "storage"]
