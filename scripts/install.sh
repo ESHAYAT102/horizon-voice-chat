@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-# Like Skater: clone, build, install per-user; never silently install dependencies.
+# Clone, build and install per user; never silently install dependencies.
 repo_url=${HORIZON_VOICE_REPO:-https://github.com/ESHAYAT102/horizon-voice-chat.git}
 install_dir=${XDG_BIN_HOME:-$HOME/.local/bin}
 data_dir=${XDG_DATA_HOME:-$HOME/.local/share}/horizon-voice
