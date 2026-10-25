@@ -26,9 +26,9 @@ The custom client is pinned to the upstream commit in [`horizon-revision`](horiz
 
 ## Install
 
-Like [Skater](https://github.com/ESHAYAT102/skater), the shell installer clones the repository, builds from source, installs into your user directories, and cleans up its temporary checkout. Missing build packages require explicit confirmation. It never silently installs Rust, opens firewall ports, or enables services.
+The shell installer clones the repository, builds from source, installs into your user directories, and cleans up its temporary checkout. Missing build packages require explicit confirmation. It never silently installs Rust, opens firewall ports, or enables services.
 
-Run from a clone (works before this repository is published):
+Run from a clone:
 
 ```sh
 git clone https://github.com/ESHAYAT102/horizon-voice-chat.git
@@ -41,7 +41,7 @@ HORIZON_VOICE_SOURCE="$PWD" sh scripts/install.sh --relay-only
 HORIZON_VOICE_SOURCE="$PWD" sh scripts/install.sh --client-only
 ```
 
-Once published at that address, the Skater-style one-line install is:
+Or use the one-line installer:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ESHAYAT102/horizon-voice-chat/main/scripts/install.sh | sh -s -- --client-only
@@ -125,7 +125,7 @@ Join the configured game server. Wait for `Voice: MUTED [V]`, then press **V**. 
 sh scripts/uninstall.sh
 ```
 
-Or, after publication:
+Or use the one-line uninstaller:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ESHAYAT102/horizon-voice-chat/main/scripts/uninstall.sh | sh
