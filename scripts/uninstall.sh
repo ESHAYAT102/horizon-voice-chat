@@ -13,7 +13,7 @@ case "${1:-}" in
     -h|--help)
         echo 'usage: uninstall.sh'
         echo
-        echo 'Removes the .hmod, the helper, its user service and its configuration.'
+        echo 'Removes the .hmod, the helper, the relay, the user service and the configuration.'
         echo 'Horizon itself, worlds, options and resource packs are left alone.'
         exit 0
         ;;
@@ -56,25 +56,31 @@ if [ -f "$mods_txt" ]; then
     mv -f -- "$tmp" "$mods_txt"
 fi
 
-if [ -f "$install_dir/horizon-voice-helper" ]; then
-    if grep -q '^# horizon-voice-managed$' "$install_dir/horizon-voice-helper" 2>/dev/null; then
-        rm -f -- "$install_dir/horizon-voice-helper"
-        echo "Removed $install_dir/horizon-voice-helper"
-    else
-        echo "Left unrelated $install_dir/horizon-voice-helper untouched."
+for name in horizon-voice-helper horizon-voice-relay; do
+    if [ -f "$install_dir/$name" ]; then
+        if grep -q '^# horizon-voice-managed$' "$install_dir/$name" 2>/dev/null; then
+            rm -f -- "$install_dir/$name"
+            echo "Removed $install_dir/$name"
+        else
+            echo "Left unrelated $install_dir/$name untouched."
+        fi
     fi
-fi
+done
 
-for file in bin/horizon-voice-helper licenses/VOICE-LICENSE; do
+for file in bin/horizon-voice-helper bin/horizon-voice-relay licenses/VOICE-LICENSE run-relay.sh; do
     rm -f -- "$data_dir/$file"
 done
+rm -rf -- "$data_dir/examples"
 rmdir -- "$data_dir/bin" "$data_dir/licenses" "$data_dir" 2>/dev/null || true
 
-# The helper.env holds the room key; removing the install should not leave it.
-if [ -f "$config_dir/helper.env" ]; then
-    rm -f -- "$config_dir/helper.env"
-    echo "Removed $config_dir/helper.env (it held the room key)."
-fi
+# helper.env and relay.env hold the room key; removing the install should not
+# leave either behind.
+for name in helper.env relay.env; do
+    if [ -f "$config_dir/$name" ]; then
+        rm -f -- "$config_dir/$name"
+        echo "Removed $config_dir/$name (it held the room key)."
+    fi
+done
 rmdir -- "$config_dir" 2>/dev/null || true
 
 echo 'Uninstalled. Horizon, your worlds, options and resource packs were not changed.'

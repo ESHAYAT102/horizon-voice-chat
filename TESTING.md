@@ -6,6 +6,7 @@ Local checks, 2026-10-26, Linux x86-64:
 - `cargo clippy --locked --all-targets --features client -- -D warnings`: passes.
 - Shell syntax checks: pass for all scripts.
 - `scripts/build-mod.sh` builds `dist/horizon_voice.hmod` (12,754 bytes) and writes its SHA-256.
+- Relay-only install and uninstall in throwaway XDG folders: the relay binary, `run-relay.sh`, examples and wrapper are installed and removed.
 - `scripts/test-install.sh`: mod-only install, full install with `--no-service`, reinstall (one switch line), uninstall, repeated uninstall, preservation of another mod, a world file and unrelated commands, and the ownership guard all pass in temporary XDG directories.
 - The user service unit is generated with an absolute, quoted `ExecStart` and `WantedBy=default.target`; enabling was exercised with a throwaway `XDG_CONFIG_HOME`, so the unit was written and removed but not started by the real user manager.
 - Stock Horizon **v0.2.58** with its own prepared 26.3 resources, isolated `HORIZON_HOME` and `XDG_*`:
