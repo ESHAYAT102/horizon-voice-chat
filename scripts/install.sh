@@ -175,7 +175,7 @@ echo "Enabled Horizon Voice Chat in $mods_txt"
 
 if [ "$mode" = mod ]; then
     echo 'The mod is installed. /voice and the HUD work now; audio needs the helper:'
-    echo "  sh $source_dir/scripts/install.sh   (without --mod-only)"
+    echo '  run the installer again without --mod-only'
     exit 0
 fi
 
