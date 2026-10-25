@@ -129,7 +129,7 @@ In game, type:
 /voice status     connection, microphone state and room size
 ```
 
-The bottom-left indicator shows `Voice: MUTED`, `Voice: MIC ON`, or `Voice: MIC ON · 2 others`. It says `Voice: helper not running` when the helper is not up.
+The bottom-left indicator shows `Voice: MUTED`, `Voice: MIC ON`, or `Voice: MIC ON · 2 others`. It says `Voice: helper not running` when the helper is not up. Start Horizon (or restart it) after installing, so the new mod is loaded.
 
 The sandbox cannot see keyboard shortcuts, so **V** is a desktop shortcut that flips the same control file:
 
