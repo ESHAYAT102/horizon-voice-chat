@@ -1,0 +1,10 @@
+/target/
+/dist/
+/.horizon-cache/
+*.env
+!*.env.example
+*.key
+.local/
+*.jar
+*.mcworld
+*.hmod

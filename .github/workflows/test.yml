@@ -1,0 +1,25 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run: cargo fmt --check
+      - run: cargo test --locked --features client
+      - run: cargo clippy --locked --all-targets --features client -- -D warnings
+      - run: for f in scripts/*.sh; do sh -n "$f"; done
+      - run: sh scripts/test-install.sh
+      - run: sh scripts/test-wrapper.sh
+      - run: |
+          git init /tmp/horizon
+          git -C /tmp/horizon remote add origin https://github.com/ludovic111/horizon.git
+          git -C /tmp/horizon fetch --depth 1 origin "$(cat horizon-revision)"
+          git -C /tmp/horizon checkout --detach FETCH_HEAD
+          git -C /tmp/horizon apply --check "$PWD/patches/horizon.patch"

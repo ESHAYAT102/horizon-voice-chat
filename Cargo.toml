@@ -1,0 +1,19 @@
+[package]
+name = "horizon-voice"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+
+[features]
+client = ["dep:cpal"]
+
+[dependencies]
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.9"
+cpal = { version = "0.16", optional = true }
+
+[[bin]]
+name = "horizon-voice-relay"
+path = "src/main.rs"
