@@ -1,5 +1,10 @@
 # Horizon Voice Chat
 
+> **Experimental native game/server integration:** see [native/README.md](native/README.md).
+> It patches an official upstream engine build (not the launcher) to carry voice
+> through joined game sessions, without a helper or separate relay. It is not the
+> default installer below and must be tested before replacing a live installation.
+
 Toggle-to-talk voice chat for [Horizon](https://github.com/ludovic111/horizon), installed **on top of an existing Horizon** as a mod plus a small companion helper. Nothing replaces Horizon, and uninstalling leaves the game exactly as it was.
 
 It is a clean-room Horizon implementation in the spirit of [Simple Voice Chat](https://modrinth.com/plugin/simple-voice-chat) by Max Henkel, with no code from it. This is an **unofficial port for Horizon**, not a Fabric/NeoForge mod and not a Simple Voice Chat protocol implementation.

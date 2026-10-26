@@ -11,3 +11,5 @@
 *.hmod
 !/dist/horizon_voice.hmod
 /dist/*.tmp
+__pycache__/
+*.pyc

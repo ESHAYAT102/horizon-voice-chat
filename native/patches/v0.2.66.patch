@@ -1,0 +1,569 @@
+diff --git i/crates/horizon-client/src/game.rs w/crates/horizon-client/src/game.rs
+index f5803ad0..fa623f13 100644
+--- i/crates/horizon-client/src/game.rs
++++ w/crates/horizon-client/src/game.rs
+@@ -102,6 +102,7 @@ mod mounts;
+ mod moving_pistons;
+ mod music;
+ mod names;
++mod native_voice;
+ mod natural_spawning;
+ mod nautili;
+ mod net_harness;
+@@ -1132,6 +1133,7 @@ fn select_creative_tab(
+ }
+ 
+ struct Game<'a> {
++    native_voice: native_voice::NativeVoice,
+     /// Shared with an integrated server; `collision` and `motion` borrow from it.
+     res: Arc<Resources>,
+     rest_loader: Option<WorldRestLoader>,
+@@ -4090,6 +4092,7 @@ impl Game<'_> {
+         self.with_level(|b, level, ticks| b.notify_written(level, ticks, position, flags));
+     }
+     fn tick(&mut self) -> Result<()> {
++        self.native_voice_tick();
+         self.tick_debug_keys()?;
+         self.tick_debug_charts();
+         if self.remote.is_some() {
+@@ -4838,6 +4841,7 @@ impl Game<'_> {
+     }
+     fn hud_layers(&mut self, size: [u32; 2]) -> HudBatch {
+         let mut batch = HudBatch::new(size);
++        self.native_voice_hud(&mut batch);
+         let (w, h) = (batch.width, batch.height);
+         if self.screen == Screen::Win {
+             self.draw_win_screen(&mut batch);
+@@ -11478,6 +11482,13 @@ impl ApplicationHandler for Game<'_> {
+                         return Ok(());
+                     };
+                     self.extras_key(key, event.state == ElementState::Pressed, event.repeat);
++                    if key == KeyCode::KeyV
++                        && self.screen == Screen::Playing
++                        && event.state == ElementState::Pressed
++                        && !event.repeat
++                    {
++                        self.native_voice_toggle();
++                    }
+                     // key.smoothCamera toggles the cinematic camera.
+                     if self.screen == Screen::Playing
+                         && event.state == ElementState::Pressed
+@@ -11884,6 +11895,7 @@ impl<'a> Game<'a> {
+             cursor: (0.0, 0.0),
+             captured: false,
+             focused: true,
++            native_voice: Default::default(),
+             modifiers: winit::keyboard::ModifiersState::empty(),
+             fullscreen: horizon_client::window::FullscreenState::new(false),
+             mouse: MouseLook::default(),
+diff --git i/crates/horizon-client/src/game/lan.rs w/crates/horizon-client/src/game/lan.rs
+index ddb959cf..824aa217 100644
+--- i/crates/horizon-client/src/game/lan.rs
++++ w/crates/horizon-client/src/game/lan.rs
+@@ -940,6 +940,7 @@ impl Game<'_> {
+                     }
+                     HostEvent::Joined(conn) => {
+                         self.lan_guest_joined(&mut host, conn, state.as_ref(), entities, spawn);
++                        self.native_voice_joined(&mut host, conn);
+                         if self.options.dedicated.is_some()
+                             && let Some(g) = host.hub.guest(conn)
+                         {
+diff --git i/crates/horizon-client/src/game/lan_actions.rs w/crates/horizon-client/src/game/lan_actions.rs
+index 9d4d868e..7ac73445 100644
+--- i/crates/horizon-client/src/game/lan_actions.rs
++++ w/crates/horizon-client/src/game/lan_actions.rs
+@@ -863,6 +863,12 @@ impl Game<'_> {
+ 
+     /// A packet from a guest that the hub does not handle itself.
+     pub(super) fn lan_guest_packet(&mut self, host: &mut LanHost, conn: u32, packet: S) {
++        if let S::CustomPayload(p) = &packet
++            && p.channel == horizon_client::native_voice::CHANNEL
++        {
++            self.native_voice_server(host, conn, &p.data);
++            return;
++        }
+         let Some(gi) = host.hub.guests.iter().position(|g| g.conn == conn) else {
+             return;
+         };
+diff --git i/crates/horizon-client/src/game/native_voice.rs w/crates/horizon-client/src/game/native_voice.rs
+new file mode 100644
+index 00000000..cb625c91
+--- /dev/null
++++ w/crates/horizon-client/src/game/native_voice.rs
+@@ -0,0 +1,129 @@
++//! Engine extension, not a sandboxed plugin: voice uses joined game sessions.
++use super::{Game, lan::LanHost};
++use horizon_client::native_voice::{self as wire, Budget};
++#[cfg(feature = "audio")]
++use horizon_protocol::packets::play::Serverbound as S;
++use horizon_protocol::packets::{configuration::CustomPayload, play::Clientbound as C};
++use std::collections::HashMap;
++
++#[derive(Default)]
++pub(super) struct NativeVoice {
++    peers: HashMap<u32, Budget>,
++    #[cfg(feature = "audio")]
++    audio: Option<wire::audio::Audio>,
++}
++fn enabled() -> bool {
++    match std::env::var("HORIZON_NATIVE_VOICE").as_deref() {
++        Ok("1") => true,
++        Ok(_) => false,
++        Err(_) => Game::options_path()
++            .with_file_name("horizon-voice.enabled")
++            .is_file(),
++    }
++}
++fn payload(data: Vec<u8>) -> CustomPayload {
++    CustomPayload {
++        channel: wire::CHANNEL.into(),
++        data,
++    }
++}
++
++impl Game<'_> {
++    pub(super) fn native_voice_joined(&mut self, host: &mut LanHost, conn: u32) {
++        if enabled() {
++            host.hub
++                .send_to(conn, &C::CustomPayload(payload(wire::HELLO.to_vec())));
++        }
++    }
++    pub(super) fn native_voice_server(&mut self, host: &mut LanHost, conn: u32, data: &[u8]) {
++        if !enabled() {
++            return;
++        }
++        self.native_voice
++            .peers
++            .retain(|id, _| host.hub.guest(*id).is_some());
++        let Some(sender) = host.hub.guest(conn).filter(|g| g.placed) else {
++            return;
++        };
++        let sender_id = sender.entity_id as u32;
++        if data == wire::JOIN {
++            self.native_voice.peers.entry(conn).or_default();
++            return;
++        }
++        if !sender.loaded {
++            return;
++        }
++        let Some(budget) = self.native_voice.peers.get_mut(&conn) else {
++            return;
++        };
++        if !budget.accept(data, std::time::Instant::now()) {
++            return;
++        }
++        let Some(data) = wire::forwarded(sender_id, data) else {
++            return;
++        };
++        let packet = C::CustomPayload(payload(data));
++        for &id in self.native_voice.peers.keys().filter(|id| **id != conn) {
++            if host.hub.guest(id).is_some_and(|g| g.loaded) {
++                host.hub.send_to(id, &packet);
++            }
++        }
++    }
++    pub(super) fn native_voice_received(&mut self, data: &[u8]) {
++        if !enabled() {
++            return;
++        }
++        #[cfg(feature = "audio")]
++        {
++            if data == wire::HELLO && self.native_voice.audio.is_none() {
++                match wire::audio::Audio::start() {
++                    Ok(audio) => {
++                        self.native_voice.audio = Some(audio);
++                        self.send(S::CustomPayload(payload(wire::JOIN.to_vec())));
++                    }
++                    Err(e) => log::warn!("Native voice: {e}"),
++                }
++            } else if let Some(audio) = &self.native_voice.audio {
++                audio.receive(data);
++            }
++        }
++        #[cfg(not(feature = "audio"))]
++        let _ = data;
++    }
++    pub(super) fn native_voice_tick(&mut self) {
++        #[cfg(feature = "audio")]
++        if let Some(audio) = &self.native_voice.audio {
++            if self.remote.is_none() {
++                self.native_voice.audio = None;
++                return;
++            }
++            if self.screen != super::Screen::Playing || !self.focused {
++                audio.mute();
++            }
++            for data in audio.drain() {
++                self.send(S::CustomPayload(payload(data)));
++            }
++        }
++    }
++    pub(super) fn native_voice_toggle(&self) {
++        #[cfg(feature = "audio")]
++        if let Some(audio) = &self.native_voice.audio {
++            audio.toggle();
++        }
++    }
++    pub(super) fn native_voice_hud(&self, batch: &mut horizon_client::hud::HudBatch) {
++        #[cfg(feature = "audio")]
++        if let Some(audio) = &self.native_voice.audio {
++            let text = if let Some(e) = audio.error() {
++                format!("Voice unavailable: {e}")
++            } else if audio.muted() {
++                "Voice: MUTED [V]".into()
++            } else {
++                "Voice: MIC ON [V to mute]".into()
++            };
++            batch.text(&self.gui.atlas, &text, 6., 6., u32::MAX, true);
++        }
++        #[cfg(not(feature = "audio"))]
++        let _ = batch;
++    }
++}
+diff --git i/crates/horizon-client/src/game/remote.rs w/crates/horizon-client/src/game/remote.rs
+index 2636b006..3627c525 100644
+--- i/crates/horizon-client/src/game/remote.rs
++++ w/crates/horizon-client/src/game/remote.rs
+@@ -459,6 +459,7 @@ impl Game<'_> {
+ 
+     /// Disconnect and return to the multiplayer screen (DisconnectedScreen).
+     pub(super) fn leave_server(&mut self, reason: Option<String>) -> Result<()> {
++        self.native_voice = Default::default();
+         if reason.is_none() && self.integrated.as_ref().is_some_and(|s| !s.stopped()) {
+             return self.begin_closing_save(false);
+         }
+@@ -1574,6 +1575,9 @@ impl Game<'_> {
+ 
+     fn handle_packet(&mut self, packet: C) -> Result<()> {
+         match packet {
++            C::CustomPayload(p) if p.channel == horizon_client::native_voice::CHANNEL => {
++                self.native_voice_received(&p.data);
++            }
+             // ClientCommonPacketListenerImpl.handlePing runs on the game
+             // thread, after all preceding packets (especially teleports).
+             C::Ping(p) => self.send(S::Pong(p)),
+diff --git i/crates/horizon-client/src/lib.rs w/crates/horizon-client/src/lib.rs
+index ad05153e..74dc8ff7 100644
+--- i/crates/horizon-client/src/lib.rs
++++ w/crates/horizon-client/src/lib.rs
+@@ -126,6 +126,7 @@ pub mod motion;
+ pub mod mouse;
+ pub mod multiplayer;
+ pub mod music;
++pub mod native_voice;
+ pub mod nbt_path;
+ pub mod net;
+ pub mod nether_portal;
+diff --git i/crates/horizon-client/src/native_voice.rs w/crates/horizon-client/src/native_voice.rs
+new file mode 100644
+index 00000000..5b2637ae
+--- /dev/null
++++ w/crates/horizon-client/src/native_voice.rs
+@@ -0,0 +1,307 @@
++//! Opt-in voice over the existing game connection. No second socket or room key.
++//! PCM16 mono, 16 kHz, 20 ms frames. TCP means congestion can delay voice.
++pub const CHANNEL: &str = "horizon:voice_v1";
++pub const FRAME: usize = 640;
++pub const HELLO: &[u8] = &[0];
++pub const JOIN: &[u8] = &[1];
++
++/// Per-game-connection rate limit; never trust a claimed sender id.
++pub struct Budget {
++    since: std::time::Instant,
++    frames: u32,
++}
++impl Default for Budget {
++    fn default() -> Self {
++        Self {
++            since: std::time::Instant::now(),
++            frames: 0,
++        }
++    }
++}
++impl Budget {
++    pub fn accept(&mut self, bytes: &[u8], now: std::time::Instant) -> bool {
++        if bytes.len() != FRAME + 1 || bytes[0] != 2 {
++            return false;
++        }
++        if now.duration_since(self.since) >= std::time::Duration::from_secs(1) {
++            self.since = now;
++            self.frames = 0;
++        }
++        if self.frames >= 60 {
++            return false;
++        }
++        self.frames += 1;
++        true
++    }
++}
++
++pub fn forwarded(sender: u32, frame: &[u8]) -> Option<Vec<u8>> {
++    if frame.len() != FRAME + 1 || frame[0] != 2 {
++        return None;
++    }
++    let mut data = Vec::with_capacity(FRAME + 5);
++    data.push(2);
++    data.extend_from_slice(&sender.to_be_bytes());
++    data.extend_from_slice(&frame[1..]);
++    Some(data)
++}
++
++#[cfg(feature = "audio")]
++pub mod audio {
++    use super::FRAME;
++    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
++    use std::{
++        collections::{HashMap, VecDeque},
++        sync::{
++            Arc, Mutex,
++            atomic::{AtomicBool, Ordering},
++            mpsc::{self, Receiver, SyncSender},
++        },
++        thread,
++        time::Duration,
++    };
++    type Queues = Arc<Mutex<HashMap<u32, VecDeque<f32>>>>;
++    pub struct Audio {
++        muted: Arc<AtomicBool>,
++        alive: Arc<AtomicBool>,
++        outgoing: Receiver<Vec<u8>>,
++        incoming: SyncSender<Vec<u8>>,
++        error: Arc<Mutex<Option<String>>>,
++    }
++    impl Audio {
++        pub fn start() -> Result<Self, String> {
++            if std::env::var_os("HORIZON_NO_AUDIO").is_some() {
++                return Err("audio disabled".into());
++            }
++            let muted = Arc::new(AtomicBool::new(true));
++            let alive = Arc::new(AtomicBool::new(true));
++            let error = Arc::new(Mutex::new(None));
++            let (tx, outgoing) = mpsc::sync_channel(3);
++            let (incoming, rx) = mpsc::sync_channel(32);
++            let (m, a, e) = (muted.clone(), alive.clone(), error.clone());
++            thread::Builder::new()
++                .name("Native voice audio".into())
++                .spawn(move || {
++                    if let Err(message) = run(tx, rx, m.clone(), a.clone()) {
++                        m.store(true, Ordering::Release);
++                        *e.lock().unwrap() = Some(message);
++                    }
++                    a.store(false, Ordering::Release);
++                })
++                .map_err(|e| e.to_string())?;
++            Ok(Self {
++                muted,
++                alive,
++                outgoing,
++                incoming,
++                error,
++            })
++        }
++        pub fn mute(&self) {
++            self.muted.store(true, Ordering::Release);
++        }
++        pub fn toggle(&self) {
++            if self.alive.load(Ordering::Acquire) {
++                self.muted.fetch_xor(true, Ordering::AcqRel);
++            }
++        }
++        pub fn muted(&self) -> bool {
++            self.muted.load(Ordering::Acquire)
++        }
++        pub fn error(&self) -> Option<String> {
++            self.error.lock().unwrap().clone()
++        }
++        pub fn drain(&self) -> Vec<Vec<u8>> {
++            let frames: Vec<_> = self.outgoing.try_iter().take(3).collect();
++            if self.muted() { Vec::new() } else { frames }
++        }
++        pub fn receive(&self, bytes: &[u8]) {
++            if bytes.len() == FRAME + 5 && bytes[0] == 2 {
++                let _ = self.incoming.try_send(bytes.to_vec());
++            }
++        }
++    }
++    impl Drop for Audio {
++        fn drop(&mut self) {
++            self.mute();
++            self.alive.store(false, Ordering::Release);
++        }
++    }
++    fn input<T>(
++        device: &cpal::Device,
++        config: &cpal::StreamConfig,
++        tx: SyncSender<Vec<u8>>,
++        muted: Arc<AtomicBool>,
++        alive: Arc<AtomicBool>,
++    ) -> Result<cpal::Stream, String>
++    where
++        T: cpal::SizedSample,
++        f32: cpal::FromSample<T>,
++    {
++        let channels = config.channels as usize;
++        let rate = config.sample_rate.0;
++        let mut phase = 0u32;
++        let mut frame = vec![2u8];
++        let running = alive.clone();
++        device
++            .build_input_stream(
++                config,
++                move |samples: &[T], _| {
++                    if muted.load(Ordering::Acquire) || !running.load(Ordering::Acquire) {
++                        frame.truncate(1);
++                        phase = 0;
++                        return;
++                    }
++                    for chunk in samples.chunks_exact(channels) {
++                        let mono = chunk
++                            .iter()
++                            .map(|s| <f32 as cpal::Sample>::from_sample(*s))
++                            .sum::<f32>()
++                            / channels as f32;
++                        phase += 16000;
++                        while phase >= rate {
++                            phase -= rate;
++                            frame.extend_from_slice(
++                                &((mono.clamp(-1., 1.) * 32767.) as i16).to_le_bytes(),
++                            );
++                            if frame.len() == FRAME + 1 {
++                                let _ = tx.try_send(std::mem::replace(&mut frame, vec![2]));
++                            }
++                        }
++                    }
++                },
++                move |_| {
++                    alive.store(false, Ordering::Release);
++                },
++                None,
++            )
++            .map_err(|e| e.to_string())
++    }
++    fn output<T>(
++        device: &cpal::Device,
++        config: &cpal::StreamConfig,
++        queues: Queues,
++        alive: Arc<AtomicBool>,
++    ) -> Result<cpal::Stream, String>
++    where
++        T: cpal::SizedSample + cpal::FromSample<f32>,
++    {
++        let channels = config.channels as usize;
++        let rate = config.sample_rate.0;
++        let mut phase = 0u32;
++        let mut sample = 0f32;
++        let running = alive.clone();
++        device
++            .build_output_stream(
++                config,
++                move |out: &mut [T], _| {
++                    out.fill(T::from_sample(0.));
++                    if !running.load(Ordering::Acquire) {
++                        return;
++                    }
++                    let Ok(mut queues) = queues.try_lock() else {
++                        return;
++                    };
++                    for chunk in out.chunks_exact_mut(channels) {
++                        phase += 16000;
++                        while phase >= rate {
++                            phase -= rate;
++                            sample = queues
++                                .values_mut()
++                                .map(|q| q.pop_front().unwrap_or(0.))
++                                .sum::<f32>()
++                                .clamp(-1., 1.);
++                        }
++                        chunk.fill(T::from_sample(sample));
++                    }
++                },
++                move |_| {
++                    alive.store(false, Ordering::Release);
++                },
++                None,
++            )
++            .map_err(|e| e.to_string())
++    }
++    fn run(
++        tx: SyncSender<Vec<u8>>,
++        rx: Receiver<Vec<u8>>,
++        muted: Arc<AtomicBool>,
++        alive: Arc<AtomicBool>,
++    ) -> Result<(), String> {
++        let host = cpal::default_host();
++        let mic = host.default_input_device().ok_or("no microphone")?;
++        let speaker = host.default_output_device().ok_or("no audio output")?;
++        let ic = mic.default_input_config().map_err(|e| e.to_string())?;
++        let oc = speaker.default_output_config().map_err(|e| e.to_string())?;
++        let queues: Queues = Arc::new(Mutex::new(HashMap::new()));
++        macro_rules! input {
++            ($t:ty) => {
++                input::<$t>(&mic, &ic.config(), tx, muted.clone(), alive.clone())?
++            };
++        }
++        macro_rules! output {
++            ($t:ty) => {
++                output::<$t>(&speaker, &oc.config(), queues.clone(), alive.clone())?
++            };
++        }
++        let input = match ic.sample_format() {
++            cpal::SampleFormat::F32 => input!(f32),
++            cpal::SampleFormat::I16 => input!(i16),
++            cpal::SampleFormat::U16 => input!(u16),
++            _ => return Err("unsupported microphone format".into()),
++        };
++        let output = match oc.sample_format() {
++            cpal::SampleFormat::F32 => output!(f32),
++            cpal::SampleFormat::I16 => output!(i16),
++            cpal::SampleFormat::U16 => output!(u16),
++            _ => return Err("unsupported speaker format".into()),
++        };
++        input.play().map_err(|e| e.to_string())?;
++        output.play().map_err(|e| e.to_string())?;
++        while alive.load(Ordering::Acquire) {
++            if let Ok(frame) = rx.recv_timeout(Duration::from_millis(20)) {
++                let id = u32::from_be_bytes(frame[1..5].try_into().unwrap());
++                let mut queues = queues.lock().unwrap();
++                queues.retain(|_, q| !q.is_empty());
++                if queues.len() >= 32 && !queues.contains_key(&id) {
++                    continue;
++                }
++                let q = queues.entry(id).or_default();
++                if q.len() + FRAME / 2 > 3200 {
++                    q.clear();
++                }
++                q.extend(
++                    frame[5..]
++                        .as_chunks::<2>()
++                        .0
++                        .iter()
++                        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.),
++                );
++            }
++        }
++        Err("audio stopped; reconnect to retry".into())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    #[test]
++    fn identity_and_bounds() {
++        let mut data = vec![2; FRAME + 1];
++        let out = forwarded(42, &data).unwrap();
++        assert_eq!(&out[1..5], &42u32.to_be_bytes());
++        assert_eq!(&out[5..], &data[1..]);
++        data.pop();
++        assert!(forwarded(42, &data).is_none());
++        let mut budget = Budget::default();
++        let now = std::time::Instant::now();
++        assert!(!budget.accept(&data, now));
++        data.push(2);
++        for _ in 0..60 {
++            assert!(budget.accept(&data, now));
++        }
++        assert!(!budget.accept(&data, now));
++        assert!(budget.accept(&data, now + std::time::Duration::from_secs(1)));
++    }
++}
