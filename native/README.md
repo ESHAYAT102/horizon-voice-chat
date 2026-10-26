@@ -54,6 +54,16 @@ Do not enable the old companion helper at the same time: disable its user servic
 and the `horizon_voice` HUD mod when moving to native voice, after testing.
 These scripts do not automatically remove the existing working setup.
 
+For administrator-managed deployment to another Linux machine, `install.sh` can
+use an explicitly supplied tested artifact instead of compiling there. Set
+`HORIZON_VOICE_PREBUILT` to its path, `HORIZON_VOICE_PREBUILT_VERSION` to the
+matching release and `HORIZON_VOICE_PREBUILT_SHA256` to the trusted build's hash.
+The checksum is mandatory; the administrator must also ensure the artifact's
+role, architecture and shared-library requirements match the target. This is
+not automatic downloading or verification of third-party binaries. On Linux,
+installation also checks the artifact's dynamic libraries before replacement;
+a build from a newer glibc system may need rebuilding for the destination.
+
 An upstream launcher/server update can replace the patched binary. The marker
 does not lock updates; voice then needs a patch tested for the new release.
 

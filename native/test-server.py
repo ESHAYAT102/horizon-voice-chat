@@ -14,6 +14,7 @@ p.add_argument("--game", type=Path, required=True)
 p.add_argument("--probe", type=Path, required=True)
 p.add_argument("--resources", type=Path, required=True)
 p.add_argument("--accept-eula", action="store_true")
+p.add_argument("--enable-marker", action="store_true", help="Test installed-style enable marker instead of an environment flag")
 args = p.parse_args()
 if not args.accept_eula:
     p.error("Testing the game requires accepting Minecraft's EULA (--accept-eula).")
@@ -27,6 +28,9 @@ for key, name in [("HORIZON_HOME", "game"), ("HORIZON_LAUNCHER_HOME", "launcher"
 env.update(HORIZON_NO_AUDIO="1", HORIZON_LAUNCHER_NO_SELF_UPDATE="1",
            HORIZON_NATIVE_VOICE="1")
 home = base / "game"
+if args.enable_marker:
+    env.pop("HORIZON_NATIVE_VOICE", None)
+    (home / "horizon-voice.enabled").touch()
 (home / "eula.txt").write_text("eula=true\n")
 with socket.socket() as s:
     s.bind(("127.0.0.1", 0))

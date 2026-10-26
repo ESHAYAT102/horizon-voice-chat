@@ -26,6 +26,12 @@ if sh "$root/native/install.sh" "$work/horizon-client" "$work/game" v999; then
     echo 'FAIL: unsupported release accepted' >&2; exit 1
 fi
 cmp "$work/horizon-client" "$work/original"
+# Checksum mismatch cannot install or create the enable marker.
+if HORIZON_VOICE_PREBUILT="$work/original" HORIZON_VOICE_PREBUILT_VERSION=v0.2.66 HORIZON_VOICE_PREBUILT_SHA256=bad \
+    sh "$root/native/install.sh" "$work/horizon-client" "$work/game" v0.2.66 client; then
+    echo 'FAIL: unverified prebuilt accepted' >&2; exit 1
+fi
+test ! -e "$work/game/horizon-voice.enabled"
 sh "$root/native/install.sh" "$work/horizon-client" "$work/game" v0.2.66 client
 test -f "$work/game/horizon-voice.enabled"
 grep -q patched-test-binary "$work/horizon-client"
@@ -33,6 +39,11 @@ sh "$root/native/uninstall.sh" "$work/horizon-client"
 cmp "$work/horizon-client" "$work/original"
 test ! -e "$work/game/horizon-voice.enabled"
 sh "$root/native/install.sh" "$work/horizon-client" "$work/game" v0.2.66 client
+sh "$root/native/uninstall.sh" "$work/horizon-client"
+cmp "$work/horizon-client" "$work/original"
+HORIZON_VOICE_PREBUILT="$source/target/fast/horizon-client" HORIZON_VOICE_PREBUILT_VERSION=v0.2.66 \
+    HORIZON_VOICE_PREBUILT_SHA256=$(sha256sum "$source/target/fast/horizon-client" | cut -d' ' -f1) \
+    sh "$root/native/install.sh" "$work/horizon-client" "$work/game" v0.2.66 client
 sh "$root/native/uninstall.sh" "$work/horizon-client"
 cmp "$work/horizon-client" "$work/original"
 # A different binary is a different installation record.
