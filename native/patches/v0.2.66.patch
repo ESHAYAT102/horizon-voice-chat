@@ -87,10 +87,10 @@ index 9d4d868e..7ac73445 100644
          };
 diff --git i/crates/horizon-client/src/game/native_voice.rs w/crates/horizon-client/src/game/native_voice.rs
 new file mode 100644
-index 00000000..ed1a50e1
+index 00000000..7dd44a10
 --- /dev/null
 +++ w/crates/horizon-client/src/game/native_voice.rs
-@@ -0,0 +1,187 @@
+@@ -0,0 +1,235 @@
 +//! Engine extension, not a sandboxed plugin: voice uses joined game sessions.
 +use super::{Game, lan::LanHost};
 +use horizon_client::native_voice::{self as wire, Budget};
@@ -104,6 +104,31 @@ index 00000000..ed1a50e1
 +    peers: HashMap<u32, Budget>,
 +    #[cfg(feature = "audio")]
 +    audio: Option<wire::audio::Audio>,
++    #[cfg(feature = "audio")]
++    icons: Option<[Vec<u8>; 3]>,
++}
++/// User-supplied assets stay outside the binary and the public patch.
++#[cfg(feature = "audio")]
++fn load_voice_icons() -> Option<[Vec<u8>; 3]> {
++    let root = Game::options_path().with_file_name("horizon-voice-icons");
++    let mut icons = Vec::new();
++    for name in ["microphone", "microphone_off", "disconnected"] {
++        let path = root.join(format!("{name}.png"));
++        if std::fs::metadata(&path).ok()?.len() > 65536 {
++            return None;
++        }
++        let bytes = std::fs::read(path).ok()?;
++        // Refuse unexpected dimensions before decoding/allocating.
++        if bytes.get(16..24)? != [0, 0, 0, 16, 0, 0, 0, 16] {
++            return None;
++        }
++        let (width, height, pixels) = horizon_client::hud::decode_bytes(&bytes).ok()?;
++        if width != 16 || height != 16 || pixels.len() != 16 * 16 * 4 {
++            return None;
++        }
++        icons.push(pixels);
++    }
++    icons.try_into().ok()
 +}
 +fn enabled() -> bool {
 +    match std::env::var("HORIZON_NATIVE_VOICE").as_deref() {
@@ -171,6 +196,7 @@ index 00000000..ed1a50e1
 +            if data == wire::HELLO && self.native_voice.audio.is_none() {
 +                match wire::audio::Audio::start() {
 +                    Ok(audio) => {
++                        self.native_voice.icons = load_voice_icons();
 +                        self.native_voice.audio = Some(audio);
 +                        self.send(S::CustomPayload(payload(wire::JOIN.to_vec())));
 +                    }
@@ -217,6 +243,28 @@ index 00000000..ed1a50e1
 +                return;
 +            }
 +            let (x, y) = (8., batch.height - 24.);
++            if let Some(icons) = &self.native_voice.icons {
++                let pixels = &icons[if failed {
++                    2
++                } else if muted {
++                    1
++                } else {
++                    0
++                }];
++                for (i, p) in pixels.as_chunks::<4>().0.iter().enumerate() {
++                    if p[3] != 0 {
++                        batch.fill(
++                            &self.gui.atlas,
++                            x + (i % 16) as f32,
++                            y + (i / 16) as f32,
++                            1.,
++                            1.,
++                            rgba(p[0], p[1], p[2], p[3]),
++                        );
++                    }
++                }
++                return;
++            }
 +            let color = if failed {
 +                rgba(255, 204, 85, 255)
 +            } else if muted {

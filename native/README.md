@@ -15,6 +15,13 @@ still join; they simply cannot use voice. No relay or helper is needed.
   audio error (details are logged). There is no persistent text label.
   This measures signal level, not speech classification or silence suppression:
   an absent icon while quiet does **not** mean the microphone is muted.
+- To use the exact Simple Voice Chat artwork instead of the fallback glyph,
+  run `sh native/import-icons.sh /path/to/voicechat.jar /path/to/game-home`.
+  This imports the original `microphone.png`, `microphone_off.png` and
+  `disconnected.png` from your own mod into `horizon-voice-icons/`. Their pixels
+  and transparency are drawn unchanged, without recoloring or a custom slash.
+  The mod declares **All Rights Reserved**: those PNGs are not bundled in this
+  repository or the binary. Credit is written beside the local copies.
 - Voice is PCM16 mono, 16 kHz, in 20 ms frames. The server stamps the sender's
   game entity id; clients cannot claim another speaker's identity.
 - Only joined, voice-subscribed sessions send/receive audio. The server checks

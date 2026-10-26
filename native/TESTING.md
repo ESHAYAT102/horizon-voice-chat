@@ -32,7 +32,14 @@ Target: upstream `v0.2.66`, commit
   a standalone device probe, not a game run or audible two-player test.
 - Mic-icon activity tests cover digital silence, low background level, malformed
   frames, audible level, the 200 ms release boundary, reset, and full-scale input.
-  The icon states use an original 16-pixel glyph; no third-party mod assets.
+  The fallback states use an original 16-pixel glyph; no third-party mod assets
+  are bundled in the repository or binary.
+- Optional original-icon import: exact PNG bytes/alpha are preserved, local
+  attribution is written, previous icons are backed up and invalid dimensions
+  are rejected without replacing existing icons. Tests use synthetic PNGs only.
+  Local icons were also compared byte-for-byte with the user's installed mod.
+- The HUD's real Rust PNG decoder accepted all three original local textures as
+  16x16 RGBA, preserving both transparent and opaque pixels (`probe_icons.rs`).
 
 The protocol test used synthetic PCM bytes, not an audible conversation.
 Human-audible two-player voice, in-game mic/HUD interaction, packet-loss and
