@@ -30,6 +30,9 @@ Target: upstream `v0.2.66`, commit
 - Native audio worker smoke test using this machine's real input/output devices:
   pass. Started muted, produced no outgoing frames and dropped cleanly. This was
   a standalone device probe, not a game run or audible two-player test.
+- Mic-icon activity tests cover digital silence, low background level, malformed
+  frames, audible level, the 200 ms release boundary, reset, and full-scale input.
+  The icon states use an original 16-pixel glyph; no third-party mod assets.
 
 The protocol test used synthetic PCM bytes, not an audible conversation.
 Human-audible two-player voice, in-game mic/HUD interaction, packet-loss and

@@ -87,10 +87,10 @@ index 9d4d868e..7ac73445 100644
          };
 diff --git i/crates/horizon-client/src/game/native_voice.rs w/crates/horizon-client/src/game/native_voice.rs
 new file mode 100644
-index 00000000..cb625c91
+index 00000000..ed1a50e1
 --- /dev/null
 +++ w/crates/horizon-client/src/game/native_voice.rs
-@@ -0,0 +1,129 @@
+@@ -0,0 +1,187 @@
 +//! Engine extension, not a sandboxed plugin: voice uses joined game sessions.
 +use super::{Game, lan::LanHost};
 +use horizon_client::native_voice::{self as wire, Budget};
@@ -207,14 +207,72 @@ index 00000000..cb625c91
 +    pub(super) fn native_voice_hud(&self, batch: &mut horizon_client::hud::HudBatch) {
 +        #[cfg(feature = "audio")]
 +        if let Some(audio) = &self.native_voice.audio {
-+            let text = if let Some(e) = audio.error() {
-+                format!("Voice unavailable: {e}")
-+            } else if audio.muted() {
-+                "Voice: MUTED [V]".into()
++            use horizon_client::hud::rgba;
++            if self.screen != super::Screen::Playing {
++                return;
++            }
++            let failed = audio.error().is_some();
++            let muted = audio.muted();
++            if !failed && !muted && !audio.speaking() {
++                return;
++            }
++            let (x, y) = (8., batch.height - 24.);
++            let color = if failed {
++                rgba(255, 204, 85, 255)
++            } else if muted {
++                rgba(176, 176, 176, 255)
 +            } else {
-+                "Voice: MIC ON [V to mute]".into()
++                rgba(255, 255, 255, 255)
 +            };
-+            batch.text(&self.gui.atlas, &text, 6., 6., u32::MAX, true);
++            // Pixel-aligned silhouette and one-pixel shadow, matching the game HUD.
++            for (row, bits) in wire::MIC_PIXELS.iter().enumerate() {
++                for col in 0..16 {
++                    if bits & (1 << (15 - col)) != 0 {
++                        batch.fill(
++                            &self.gui.atlas,
++                            x + col as f32 + 1.,
++                            y + row as f32 + 1.,
++                            1.,
++                            1.,
++                            rgba(0, 0, 0, 160),
++                        );
++                    }
++                }
++            }
++            for (row, bits) in wire::MIC_PIXELS.iter().enumerate() {
++                for col in 0..16 {
++                    if bits & (1 << (15 - col)) != 0 {
++                        batch.fill(
++                            &self.gui.atlas,
++                            x + col as f32,
++                            y + row as f32,
++                            1.,
++                            1.,
++                            color,
++                        );
++                    }
++                }
++            }
++            if failed || muted {
++                for step in 0..12 {
++                    batch.fill(
++                        &self.gui.atlas,
++                        x + 2. + step as f32,
++                        y + 2. + step as f32,
++                        2.,
++                        2.,
++                        rgba(0, 0, 0, 255),
++                    );
++                    batch.fill(
++                        &self.gui.atlas,
++                        x + 2. + step as f32,
++                        y + 1. + step as f32,
++                        1.,
++                        1.,
++                        color,
++                    );
++                }
++            }
 +        }
 +        #[cfg(not(feature = "audio"))]
 +        let _ = batch;
@@ -256,16 +314,53 @@ index ad05153e..74dc8ff7 100644
  pub mod nether_portal;
 diff --git i/crates/horizon-client/src/native_voice.rs w/crates/horizon-client/src/native_voice.rs
 new file mode 100644
-index 00000000..5b2637ae
+index 00000000..c1171b15
 --- /dev/null
 +++ w/crates/horizon-client/src/native_voice.rs
-@@ -0,0 +1,307 @@
+@@ -0,0 +1,394 @@
 +//! Opt-in voice over the existing game connection. No second socket or room key.
 +//! PCM16 mono, 16 kHz, 20 ms frames. TCP means congestion can delay voice.
 +pub const CHANNEL: &str = "horizon:voice_v1";
 +pub const FRAME: usize = 640;
 +pub const HELLO: &[u8] = &[0];
 +pub const JOIN: &[u8] = &[1];
++
++/// Local signal indication, not a voice classifier. About -38 dBFS RMS with
++/// a short release prevents flicker between syllables. Silence never lights it.
++#[derive(Default)]
++pub struct SpeechActivity {
++    last: Option<std::time::Instant>,
++}
++impl SpeechActivity {
++    pub fn observe(&mut self, frame: &[u8], now: std::time::Instant) {
++        if frame.len() != FRAME + 1 || frame[0] != 2 {
++            return;
++        }
++        let energy: i64 = frame[1..]
++            .as_chunks::<2>()
++            .0
++            .iter()
++            .map(|b| i64::from(i16::from_le_bytes(*b)).pow(2))
++            .sum();
++        if energy >= (FRAME / 2) as i64 * 400 * 400 {
++            self.last = Some(now);
++        }
++    }
++    pub fn active(&self, now: std::time::Instant) -> bool {
++        self.last.is_some_and(|t| {
++            now.saturating_duration_since(t) < std::time::Duration::from_millis(200)
++        })
++    }
++    pub fn clear(&mut self) {
++        self.last = None;
++    }
++}
++
++/// Original pixel glyph, not an asset copied from another voice mod.
++pub const MIC_PIXELS: [u16; 16] = [
++    0x0000, 0x03c0, 0x07e0, 0x07e0, 0x07e0, 0x07e0, 0x07e0, 0x07e0, 0x1188, 0x1188, 0x0990, 0x07e0,
++    0x0180, 0x0180, 0x07e0, 0x0000,
++];
 +
 +/// Per-game-connection rate limit; never trust a claimed sender id.
 +pub struct Budget {
@@ -329,6 +424,7 @@ index 00000000..5b2637ae
 +        outgoing: Receiver<Vec<u8>>,
 +        incoming: SyncSender<Vec<u8>>,
 +        error: Arc<Mutex<Option<String>>>,
++        activity: Mutex<super::SpeechActivity>,
 +    }
 +    impl Audio {
 +        pub fn start() -> Result<Self, String> {
@@ -346,6 +442,7 @@ index 00000000..5b2637ae
 +                .spawn(move || {
 +                    if let Err(message) = run(tx, rx, m.clone(), a.clone()) {
 +                        m.store(true, Ordering::Release);
++                        log::warn!("Native voice audio stopped: {message}");
 +                        *e.lock().unwrap() = Some(message);
 +                    }
 +                    a.store(false, Ordering::Release);
@@ -357,14 +454,16 @@ index 00000000..5b2637ae
 +                outgoing,
 +                incoming,
 +                error,
++                activity: Mutex::new(super::SpeechActivity::default()),
 +            })
 +        }
 +        pub fn mute(&self) {
 +            self.muted.store(true, Ordering::Release);
++            self.activity.lock().unwrap().clear();
 +        }
 +        pub fn toggle(&self) {
-+            if self.alive.load(Ordering::Acquire) {
-+                self.muted.fetch_xor(true, Ordering::AcqRel);
++            if self.alive.load(Ordering::Acquire) && !self.muted.fetch_xor(true, Ordering::AcqRel) {
++                self.activity.lock().unwrap().clear();
 +            }
 +        }
 +        pub fn muted(&self) -> bool {
@@ -375,7 +474,26 @@ index 00000000..5b2637ae
 +        }
 +        pub fn drain(&self) -> Vec<Vec<u8>> {
 +            let frames: Vec<_> = self.outgoing.try_iter().take(3).collect();
-+            if self.muted() { Vec::new() } else { frames }
++            if self.muted() {
++                self.activity.lock().unwrap().clear();
++                Vec::new()
++            } else {
++                let now = std::time::Instant::now();
++                let mut activity = self.activity.lock().unwrap();
++                for frame in &frames {
++                    activity.observe(frame, now);
++                }
++                frames
++            }
++        }
++        pub fn speaking(&self) -> bool {
++            !self.muted()
++                && self.alive.load(Ordering::Acquire)
++                && self
++                    .activity
++                    .lock()
++                    .unwrap()
++                    .active(std::time::Instant::now())
 +        }
 +        pub fn receive(&self, bytes: &[u8]) {
 +            if bytes.len() == FRAME + 5 && bytes[0] == 2 {
@@ -548,6 +666,33 @@ index 00000000..5b2637ae
 +#[cfg(test)]
 +mod tests {
 +    use super::*;
++    #[test]
++    fn signal_activity_ignores_silence_and_holds_between_syllables() {
++        let now = std::time::Instant::now();
++        let mut signal = SpeechActivity::default();
++        let frame = |sample: i16| {
++            let mut f = vec![2];
++            for _ in 0..FRAME / 2 {
++                f.extend_from_slice(&sample.to_le_bytes());
++            }
++            f
++        };
++        signal.observe(&frame(0), now);
++        assert!(!signal.active(now));
++        signal.observe(&frame(100), now);
++        assert!(!signal.active(now));
++        signal.observe(&[2, 1], now);
++        assert!(!signal.active(now));
++        signal.observe(&frame(1000), now);
++        assert!(signal.active(now));
++        signal.observe(&frame(0), now + std::time::Duration::from_millis(100));
++        assert!(signal.active(now + std::time::Duration::from_millis(199)));
++        assert!(!signal.active(now + std::time::Duration::from_millis(200)));
++        signal.clear();
++        assert!(!signal.active(now));
++        signal.observe(&frame(i16::MIN), now);
++        assert!(signal.active(now));
++    }
 +    #[test]
 +    fn identity_and_bounds() {
 +        let mut data = vec![2; FRAME + 1];

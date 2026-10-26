@@ -9,6 +9,12 @@ still join; they simply cannot use voice. No relay or helper is needed.
 
 - The server announces `horizon:voice_v1` over its existing play connection.
 - The client subscribes automatically, but starts muted. **V** toggles capture.
+- A small pixel microphone in the bottom left indicates local sound activity.
+  It stays visible for 200 ms between syllables and disappears when the unmuted
+  microphone is quiet. A crossed gray microphone means muted; amber means an
+  audio error (details are logged). There is no persistent text label.
+  This measures signal level, not speech classification or silence suppression:
+  an absent icon while quiet does **not** mean the microphone is muted.
 - Voice is PCM16 mono, 16 kHz, in 20 ms frames. The server stamps the sender's
   game entity id; clients cannot claim another speaker's identity.
 - Only joined, voice-subscribed sessions send/receive audio. The server checks

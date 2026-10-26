@@ -3,6 +3,7 @@ fn main() {
     let audio = horizon_client::native_voice::audio::Audio::start().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(500));
     assert!(audio.muted());
+    assert!(!audio.speaking());
     assert!(audio.drain().is_empty());
     assert_eq!(audio.error(), None);
     drop(audio);
