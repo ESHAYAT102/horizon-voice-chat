@@ -203,6 +203,16 @@ env_file=$config_dir/helper.env
 configured=no
 if [ -f "$env_file" ]; then
     configured=yes
+elif [ -n "${HORIZON_VOICE_CHANNELS:-}" ]; then
+    [ -f "$HORIZON_VOICE_CHANNELS" ] || fail 'Missing voice channels configuration.'
+    umask 077
+    publish_file "$HORIZON_VOICE_CHANNELS" "$config_dir/channels.conf" 600
+    {
+        echo '# Automatically follows the joined Horizon server.'
+        echo "HORIZON_VOICE_CHANNELS=$config_dir/channels.conf"
+        echo "HORIZON_VOICE_HOME=$game_home"
+    } > "$env_file"
+    configured=yes
 elif [ -n "${HORIZON_VOICE_SERVER:-}" ] && [ -n "${HORIZON_VOICE_KEY:-}" ]; then
     umask 077
     {

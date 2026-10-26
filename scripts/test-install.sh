@@ -45,6 +45,15 @@ grep -qx 'mod.example_mod:true' "$HORIZON_HOME/horizon-mods.txt"
 test -f "$HORIZON_HOME/saves/Keep/level.dat"
 sh "$source_dir/scripts/uninstall.sh"  # a second time must not fail
 
+# Administrator-provisioned channels: no player editing or room commands.
+printf '# test routes\n' > "$work/channels.conf"
+HORIZON_VOICE_CHANNELS="$work/channels.conf" sh "$source_dir/scripts/install.sh" --no-service
+cmp "$work/channels.conf" "$XDG_CONFIG_HOME/horizon-voice/channels.conf"
+grep -qx "HORIZON_VOICE_CHANNELS=$XDG_CONFIG_HOME/horizon-voice/channels.conf" "$XDG_CONFIG_HOME/horizon-voice/helper.env"
+test "$(stat -c %a "$XDG_CONFIG_HOME/horizon-voice/channels.conf")" = 600
+sh "$source_dir/scripts/uninstall.sh"
+test ! -e "$XDG_CONFIG_HOME/horizon-voice/channels.conf"
+
 # Do not take over a command somebody else installed.
 mkdir -p "$XDG_BIN_HOME"
 printf '#!/bin/sh\necho unrelated\n' > "$XDG_BIN_HOME/horizon-voice-helper"

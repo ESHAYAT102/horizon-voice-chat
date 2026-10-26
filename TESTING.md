@@ -30,3 +30,14 @@ Local checks, 2026-10-26, Linux x86-64:
 - Relay deployment on the homelab host (UDP 24454 is currently held by an unrelated process there).
 
 Protocol tests use generated PCM and do not access a microphone. Passing them does not prove acoustic quality, echo suppression, or acceptable latency on a particular network. Headphones are recommended; this version has no echo cancellation or noise suppression.
+# Automatic channels
+
+`cargo test --features client` covers connection matching, leaving a server,
+unknown and conflicting servers, socket ownership/state filtering, IPv4-mapped
+IPv6 decoding, invalid routes and refusal of public relay addresses.
+Live game-server switching still requires an end-to-end desktop test.
+Deployment smoke test: a test-only `horizon-client` socket owner selected each
+private route against the real Cosmos and Homelab relays. Verified idle without
+a socket, Cosmos connection muted, explicit unmute, disconnect/mute, Homelab
+connection muted, and return to idle. This validates Linux socket detection and
+relay transitions, not Minecraft login, in-game HUD, or audible conversation.

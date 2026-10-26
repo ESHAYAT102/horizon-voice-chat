@@ -75,7 +75,7 @@ rmdir -- "$data_dir/bin" "$data_dir/licenses" "$data_dir" 2>/dev/null || true
 
 # helper.env and relay.env hold the room key; removing the install should not
 # leave either behind.
-for name in helper.env relay.env; do
+for name in helper.env relay.env channels.conf; do
     if [ -f "$config_dir/$name" ]; then
         rm -f -- "$config_dir/$name"
         echo "Removed $config_dir/$name (it held the room key)."

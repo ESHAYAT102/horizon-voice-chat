@@ -101,6 +101,36 @@ The relay refuses public and wildcard bind addresses on purpose. Do not expose i
 
 ## Configure each player
 
+### Automatic per-server channels (Linux)
+
+The helper can follow the server you join, without commands, a replacement client,
+or a pinned Horizon build. Your administrator supplies a private `channels.conf`:
+
+```text
+# name   game-IP:port          voice-relay-IP:port       room-key
+Cosmos   100.104.12.117:25565   100.104.12.117:24454       REPLACE_WITH_COSMOS_64_HEX_KEY
+Homelab  100.67.77.122:25566    100.67.77.122:24455        REPLACE_WITH_HOMELAB_64_HEX_KEY
+```
+
+Keep this file private (mode 600). Add a row for each address players use
+(LAN, Tailscale, IPv4 or IPv6), using the same name, relay and key for aliases.
+Addresses are numeric: DNS names must be resolved by the administrator.
+Each server uses a separate relay/key, so its audio never crosses into the other room.
+
+For a new install, an administrator can pass `HORIZON_VOICE_CHANNELS=/path/to/channels.conf`
+to the installer. For an existing install, set `HORIZON_VOICE_CHANNELS` in
+`helper.env` to the absolute path of the private channels file, then restart
+the helper once. Players then only join a game server normally.
+
+The helper checks established TCP connections owned by the desktop `horizon-client`
+through Linux `/proc`. Dedicated-server processes are ignored. It opens audio only
+for a configured connection, leaves voice on disconnect, and mutes on every switch.
+Unknown servers, unreadable connection information and conflicting concurrent sessions
+leave voice disconnected. Detection is polled every 200 ms, not an in-game join event;
+restricted `/proc`, renamed executables, proxies and Friends tunnels are not supported.
+This is automatic selection of administrator-provisioned channels, not automatic discovery
+of arbitrary servers or distribution of secret keys. Microphone toggling is still explicit.
+
 The installer asks for nothing; edit `~/.config/horizon-voice/helper.env`:
 
 ```sh

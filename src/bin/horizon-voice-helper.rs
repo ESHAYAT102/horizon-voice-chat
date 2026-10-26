@@ -14,7 +14,9 @@ status   print the state the mod would show
 Configuration (environment, then ~/.config/horizon-voice/helper.env):
   HORIZON_VOICE_SERVER  relay Tailscale IPv4 address:UDP port
   HORIZON_VOICE_KEY     shared 64-character hexadecimal room key
-  HORIZON_VOICE_HOME    Horizon game folder (default: ~/.local/share/horizon)";
+  HORIZON_VOICE_HOME    Horizon game folder (default: ~/.local/share/horizon)
+  HORIZON_VOICE_CHANNELS Private routes file; automatically follows the joined server
+                         (overrides the fixed relay/key settings)";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

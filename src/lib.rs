@@ -9,6 +9,8 @@ use std::{
 };
 
 #[cfg(feature = "client")]
+pub mod channels;
+#[cfg(feature = "client")]
 pub mod client;
 #[cfg(feature = "client")]
 pub mod helper;

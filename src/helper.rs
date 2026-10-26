@@ -38,6 +38,7 @@ pub struct Config {
     pub key: [u8; 32],
     /// The game home that holds `horizon-mods/` (Horizon's `HORIZON_HOME`).
     pub home: PathBuf,
+    pub channels: Option<PathBuf>,
 }
 
 impl Config {
@@ -92,6 +93,16 @@ impl Config {
     }
     pub fn load() -> Result<Self, String> {
         let values = Self::settings();
+        let channels = Self::get(&values, "HORIZON_VOICE_CHANNELS").map(PathBuf::from);
+        if let Some(path) = &channels {
+            crate::channels::load(path)?;
+            return Ok(Self {
+                server: "127.0.0.1:0".parse().unwrap(),
+                key: [0; 32],
+                home: Self::home()?,
+                channels,
+            });
+        }
         let server: SocketAddr = Self::get(&values, "HORIZON_VOICE_SERVER")
             .ok_or_else(|| {
                 "set HORIZON_VOICE_SERVER (or write ~/.config/horizon-voice/helper.env)".to_string()
@@ -105,6 +116,7 @@ impl Config {
             server,
             key,
             home: Self::home()?,
+            channels,
         })
     }
 }
@@ -207,6 +219,9 @@ pub struct Status {
 pub fn serve(config: &Config) -> Result<(), String> {
     let shared = Shared::new(&config.home);
     let _lock = lock(&shared)?;
+    if let Some(path) = &config.channels {
+        return serve_channels(&shared, path);
+    }
     // Always start muted: a stale control file from a crash must never open
     // the microphone before the player asks for it.
     let _ = shared.set_transmitting(false);
@@ -265,6 +280,73 @@ pub fn serve(config: &Config) -> Result<(), String> {
             last_write = std::time::Instant::now();
         }
         thread::sleep(CONTROL_INTERVAL);
+    }
+}
+
+/// No matching game connection means no audio worker, no relay and no mic.
+fn serve_channels(shared: &Shared, path: &Path) -> Result<(), String> {
+    use crate::channels::{self, Channel};
+    let _ = shared.set_transmitting(false);
+    let mut current: Option<Channel> = None;
+    let mut client: Option<Client> = None;
+    let mut wanted = false;
+    let mut pending = None;
+    let mut beat = 0u64;
+    loop {
+        // Reload routes every poll: admin updates require no user commands.
+        let loaded = channels::load(path);
+        let next = loaded
+            .as_ref()
+            .ok()
+            .and_then(|routes| channels::select(routes, &channels::connections()).cloned());
+        if next != current {
+            if let Some(old) = client.take() {
+                old.set_active(false);
+                drop(old);
+            }
+            shared.set_transmitting(false).map_err(|e| e.to_string())?;
+            wanted = false;
+            pending = None;
+            current = next;
+            if let Some(channel) = &current {
+                eprintln!("Voice channel: {} (microphone muted)", channel.name);
+                let audio = Client::start_with(channel.relay, channel.key)?;
+                audio.set_active(true);
+                client = Some(audio);
+            } else {
+                eprintln!("Voice idle: no supported server connection");
+            }
+        }
+        let mut status = Status {
+            beat,
+            ..Status::default()
+        };
+        if let Some(audio) = &client {
+            if let Some(error) = audio.error() {
+                return Err(error);
+            }
+            let now = shared.transmitting();
+            if now != wanted && pending == Some(now) {
+                wanted = now;
+                pending = None;
+                audio.muted.store(!wanted, Ordering::Release);
+            } else if now != wanted {
+                pending = Some(now);
+            } else {
+                pending = None;
+            }
+            status.connected = audio.connected();
+            status.transmitting = audio.transmitting();
+            status.peers = audio.peers();
+        } else {
+            shared.set_transmitting(false).map_err(|e| e.to_string())?;
+            status.error = loaded
+                .err()
+                .unwrap_or_else(|| "Join a voice-enabled server".into());
+        }
+        shared.write_status(&status).map_err(|e| e.to_string())?;
+        beat = beat.wrapping_add(1);
+        thread::sleep(STATUS_INTERVAL);
     }
 }
 
